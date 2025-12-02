@@ -1,9 +1,13 @@
 fx_version 'cerulean'
 game 'gta5'
 
-author 'kurai.dev'
-description 'Advanced Progression-Based Crafting System for QBCore/QBox'
-version '2.0.0'
+name 'kurai-crafting'
+author 'Kurai.Dev'
+description 'Advanced Progression Crafting System v3.0 - The Definitive Crafting Solution'
+version '3.0.0'
+repository 'https://github.com/kurai-dev/kurai-crafting'
+
+lua54 'yes'
 
 shared_scripts {
     '@ox_lib/init.lua',
@@ -27,4 +31,6 @@ dependencies {
     'oxmysql'
 }
 
-lua54 'yes'
+provides {
+    'crafting'
+}

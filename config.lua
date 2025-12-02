@@ -28,6 +28,9 @@ Config.CraftingXP = {
     vehicle_part = 40
 }
 
+-- XP required per level
+Config.XPPerLevel = 100
+
 -- QBCore item names that may be given (server uses these strings)
 Config.ProgressionDataKey = 'crafting_level' -- stored in player metadata
 

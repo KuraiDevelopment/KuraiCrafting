@@ -42,7 +42,8 @@ local function LoadModel(model)
     
     -- Request the model
     if Config.EnableDebug then
-        print('[Crafting] Requesting model: ' .. tostring(model))\n    end
+        print('[Crafting] Requesting model: ' .. tostring(model))
+    end
     
     RequestModel(hash)
     

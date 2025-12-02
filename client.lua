@@ -1,21 +1,99 @@
 -- ============================================================================
 -- KURAI.DEV ADVANCED PROGRESSION CRAFTING SYSTEM v3.0
--- Client-side with search, blueprints, specializations, tool durability
+-- Client-side with full prop spawning, search, blueprints, specializations
 -- ============================================================================
 
 local QBCore = exports['qb-core']:GetCoreObject()
+
+-- ====================== LOCAL VARIABLES ======================
 local currentStation = nil
 local isCrafting = false
 local lastCraftTime = 0
 local craftingBlips = {}
+local craftingProps = {}
 local dynamicStations = {}
 local cachedPlayerData = nil
 
--- ====================== UTILITY FUNCTIONS ======================
-local function GetPlayerLevel()
-    return lib.callback.await('crafting:getPlayerLevel', false)
+-- ====================== MODEL LOADING ======================
+local function LoadModel(model)
+    if type(model) ~= 'string' then return nil end
+    
+    local hash = GetHashKey(model)
+    
+    if not IsModelValid(hash) then
+        if Config.EnableDebug then
+            print('[Crafting] Invalid model: ' .. model)
+        end
+        return nil
+    end
+    
+    RequestModel(hash)
+    local attempts = 0
+    while not HasModelLoaded(hash) and attempts < 100 do
+        Wait(10)
+        attempts = attempts + 1
+    end
+    
+    if not HasModelLoaded(hash) then
+        print('[Crafting] Failed to load model: ' .. model)
+        return nil
+    end
+    
+    return hash
 end
 
+-- ====================== PROP MANAGEMENT ======================
+local function SpawnProp(model, coords, heading, offset)
+    if not Config.SpawnStationProps then return nil end
+    if not model then return nil end
+    
+    local modelHash = LoadModel(model)
+    if not modelHash then return nil end
+    
+    offset = offset or vector3(0.0, 0.0, -1.0)
+    
+    local propCoords = vector3(
+        coords.x + offset.x,
+        coords.y + offset.y,
+        coords.z + offset.z
+    )
+    
+    local prop = CreateObject(modelHash, propCoords.x, propCoords.y, propCoords.z, false, false, false)
+    
+    if DoesEntityExist(prop) then
+        SetEntityHeading(prop, heading or 0.0)
+        FreezeEntityPosition(prop, true)
+        SetEntityCollision(prop, true, true)
+        SetEntityInvincible(prop, true)
+        SetModelAsNoLongerNeeded(modelHash)
+        
+        if Config.EnableDebug then
+            print('[Crafting] Spawned prop: ' .. model .. ' at ' .. tostring(propCoords))
+        end
+        
+        return prop
+    end
+    
+    SetModelAsNoLongerNeeded(modelHash)
+    return nil
+end
+
+local function DeleteProp(prop)
+    if prop and DoesEntityExist(prop) then
+        DeleteEntity(prop)
+        return true
+    end
+    return false
+end
+
+local function ClearAllProps()
+    for index, prop in pairs(craftingProps) do
+        DeleteProp(prop)
+    end
+    craftingProps = {}
+end
+
+-- ====================== UTILITY FUNCTIONS ======================
 local function ShowNotification(title, description, type)
     lib.notify({
         title = title,
@@ -53,11 +131,9 @@ local function PlayCraftingAnimation(stationType)
 end
 
 local function StopCraftingAnimation()
-    local ped = PlayerPedId()
-    ClearPedTasks(ped)
+    ClearPedTasks(PlayerPedId())
 end
 
--- ====================== FORMATTING HELPERS ======================
 local function FormatIngredients(ingredients)
     local text = ''
     for i, ing in ipairs(ingredients) do
@@ -78,7 +154,7 @@ local function GetCategoryIcon(category)
         electronics = 'fa-solid fa-microchip',
         weapons = 'fa-solid fa-gun',
         attachments = 'fa-solid fa-crosshairs',
-        ammo = 'fa-solid fa-bullets',
+        ammo = 'fa-solid fa-box',
         medical = 'fa-solid fa-briefcase-medical',
         chemistry = 'fa-solid fa-flask',
         food = 'fa-solid fa-burger',
@@ -120,13 +196,10 @@ local function OpenCraftingMenu(station)
         local recipes = data.recipes
         local lockedRecipes = data.lockedRecipes or {}
         local playerLevel = data.level
-        local playerXP = data.xp
-        local nextLevelXP = data.nextLevelXP
         local spec = data.specialization
         
         -- Group recipes by category
         local categories = {}
-        local lockedCategories = {}
         
         for id, recipe in pairs(recipes) do
             if not categories[recipe.category] then
@@ -135,7 +208,6 @@ local function OpenCraftingMenu(station)
             table.insert(categories[recipe.category], {id = id, recipe = recipe, locked = false})
         end
         
-        -- Add locked recipes if configured
         if Config.ShowLockedRecipes then
             for id, lockedData in pairs(lockedRecipes) do
                 local recipe = lockedData.recipe
@@ -143,9 +215,9 @@ local function OpenCraftingMenu(station)
                     categories[recipe.category] = {}
                 end
                 table.insert(categories[recipe.category], {
-                    id = id, 
-                    recipe = recipe, 
-                    locked = true, 
+                    id = id,
+                    recipe = recipe,
+                    locked = true,
                     lockReason = lockedData.reason
                 })
             end
@@ -155,11 +227,11 @@ local function OpenCraftingMenu(station)
         
         -- Player info header
         local specText = spec and (' | ' .. Config.Specializations[spec.type].label) or ''
-        local progressPercent = math.floor((playerXP / nextLevelXP) * 100)
+        local progressPercent = math.floor((data.xp / data.nextLevelXP) * 100)
         
         table.insert(contextMenu, {
             title = '📊 Level ' .. playerLevel .. ' ' .. data.title .. specText,
-            description = 'XP: ' .. playerXP .. '/' .. nextLevelXP .. ' (' .. progressPercent .. '%) | Crafted: ' .. data.totalCrafted,
+            description = 'XP: ' .. data.xp .. '/' .. data.nextLevelXP .. ' (' .. progressPercent .. '%) | Crafted: ' .. data.totalCrafted,
             icon = 'fa-solid fa-chart-line',
             disabled = true
         })
@@ -176,7 +248,7 @@ local function OpenCraftingMenu(station)
             })
         end
         
-        -- Specialization option (if available)
+        -- Specialization option
         if Config.EnableSpecializations then
             local specIcon = spec and Config.Specializations[spec.type].icon or 'fa-solid fa-star'
             local specLabel = spec and ('Specialization: ' .. Config.Specializations[spec.type].label) or 'Choose Specialization'
@@ -204,7 +276,6 @@ local function OpenCraftingMenu(station)
         end
         table.sort(sortedCategories)
         
-        -- Add categories
         for _, category in ipairs(sortedCategories) do
             local categoryRecipes = categories[category]
             local availableCount = 0
@@ -254,7 +325,6 @@ function OpenRecipeSearch(station, playerData)
     local searchTerm = string.lower(input[1])
     local results = {}
     
-    -- Search available recipes
     for id, recipe in pairs(playerData.recipes) do
         if string.find(string.lower(recipe.label), searchTerm) or
            string.find(string.lower(recipe.description or ''), searchTerm) then
@@ -262,16 +332,15 @@ function OpenRecipeSearch(station, playerData)
         end
     end
     
-    -- Search locked recipes
     if Config.ShowLockedRecipes and playerData.lockedRecipes then
         for id, lockedData in pairs(playerData.lockedRecipes) do
             local recipe = lockedData.recipe
             if string.find(string.lower(recipe.label), searchTerm) or
                string.find(string.lower(recipe.description or ''), searchTerm) then
                 table.insert(results, {
-                    id = id, 
-                    recipe = recipe, 
-                    locked = true, 
+                    id = id,
+                    recipe = recipe,
+                    locked = true,
                     lockReason = lockedData.reason
                 })
             end
@@ -283,7 +352,6 @@ function OpenRecipeSearch(station, playerData)
         return
     end
     
-    -- Sort by level
     table.sort(results, function(a, b)
         return a.recipe.requiredLevel < b.recipe.requiredLevel
     end)
@@ -302,14 +370,12 @@ function OpenRecipeSearch(station, playerData)
         local recipe = recipeData.recipe
         local isLocked = recipeData.locked
         
-        local icon = GetCategoryIcon(recipe.category)
         local title = recipe.label
         local description = recipe.category:sub(1,1):upper() .. recipe.category:sub(2) .. ' • Level ' .. recipe.requiredLevel .. ' • ' .. recipe.xp .. ' XP'
         
         if isLocked then
             if recipeData.lockReason == 'blueprint' then
                 title = '🔒 ' .. title .. ' [Blueprint Required]'
-                description = description .. '\n📜 Rarity: ' .. (recipe.blueprintRarity or 'unknown')
             else
                 title = '🔒 ' .. title .. ' [Level ' .. recipe.requiredLevel .. ']'
             end
@@ -318,7 +384,7 @@ function OpenRecipeSearch(station, playerData)
         table.insert(contextMenu, {
             title = title,
             description = description,
-            icon = icon,
+            icon = GetCategoryIcon(recipe.category),
             disabled = isLocked,
             arrow = not isLocked,
             onSelect = not isLocked and function()
@@ -340,15 +406,13 @@ end
 function OpenCategoryMenu(station, category, recipes, playerLevel, playerData)
     local contextMenu = {}
     
-    -- Sort by required level
     table.sort(recipes, function(a, b)
         if a.locked ~= b.locked then
-            return not a.locked  -- Unlocked first
+            return not a.locked
         end
         return a.recipe.requiredLevel < b.recipe.requiredLevel
     end)
     
-    -- Check for specialization bonus
     local spec = playerData.specialization
     local hasSpecBonus = false
     if spec and Config.EnableSpecializations then
@@ -364,8 +428,7 @@ function OpenCategoryMenu(station, category, recipes, playerLevel, playerData)
     if hasSpecBonus then
         table.insert(contextMenu, {
             title = '⭐ Specialization Bonus Active!',
-            description = '+' .. math.floor(Config.Specializations[spec.type].xpBonus * 100) .. '% XP, +' .. 
-                          math.floor(Config.Specializations[spec.type].successBonus * 100) .. '% Success',
+            description = '+' .. math.floor(Config.Specializations[spec.type].xpBonus * 100) .. '% XP',
             icon = Config.Specializations[spec.type].icon,
             disabled = true
         })
@@ -377,36 +440,26 @@ function OpenCategoryMenu(station, category, recipes, playerLevel, playerData)
         local isLocked = recipeData.locked
         local lockReason = recipeData.lockReason
         
-        local canCraft = not isLocked
         local title = recipe.label
         local description = 'Ingredients: ' .. FormatIngredients(recipe.ingredients)
         
-        -- Tool requirement
         if recipe.requiredTool then
             local toolLabel = Config.Tools[recipe.requiredTool] and Config.Tools[recipe.requiredTool].label or recipe.requiredTool
-            local durabilityText = FormatToolDurability(recipe.requiredTool)
             description = description .. '\n🔧 Requires: ' .. toolLabel
-            if durabilityText ~= '' then
-                description = description .. ' ' .. durabilityText
-            end
         end
         
-        -- Level and XP info
         local levelText = '✓ Level ' .. recipe.requiredLevel
         if isLocked and lockReason == 'level' then
             levelText = '🔒 Level ' .. recipe.requiredLevel
         end
         description = description .. '\n' .. levelText .. ' • ' .. recipe.xp .. ' XP'
         
-        -- Quality info
         if recipe.canProduceQuality then
             description = description .. ' • ✨ Quality'
         end
         
-        -- Blueprint lock info
         if isLocked and lockReason == 'blueprint' then
             title = '🔒 ' .. title
-            local rarityColor = GetRarityColor(recipe.blueprintRarity)
             description = description .. '\n📜 Blueprint Required (' .. (recipe.blueprintRarity or 'unknown') .. ')'
         end
         
@@ -475,27 +528,13 @@ function OpenSpecializationMenu()
                 disabled = true
             })
             
-            -- Bonus categories
-            local bonusText = table.concat(data.current.type and currentSpec.bonusCategories or {}, ', ')
+            local bonusText = table.concat(currentSpec.bonusCategories, ', ')
             table.insert(contextMenu, {
                 title = '✅ Bonus Categories',
-                description = bonusText .. '\n+' .. math.floor(currentSpec.xpBonus * 100) .. '% XP, +' .. 
-                              math.floor(currentSpec.successBonus * 100) .. '% Success, +' .. 
-                              math.floor(currentSpec.qualityBonus * 100) .. '% Quality',
+                description = bonusText .. '\n+' .. math.floor(currentSpec.xpBonus * 100) .. '% XP',
                 icon = 'fa-solid fa-arrow-up',
                 disabled = true
             })
-            
-            -- Penalty categories
-            if currentSpec.penaltyCategories and #currentSpec.penaltyCategories > 0 then
-                local penaltyText = table.concat(currentSpec.penaltyCategories, ', ')
-                table.insert(contextMenu, {
-                    title = '⚠️ Reduced Categories',
-                    description = penaltyText .. '\n-' .. math.floor(currentSpec.xpPenalty * 100) .. '% XP',
-                    icon = 'fa-solid fa-arrow-down',
-                    disabled = true
-                })
-            end
             
             if data.canReset then
                 table.insert(contextMenu, {
@@ -505,18 +544,17 @@ function OpenSpecializationMenu()
                     onSelect = function()
                         local confirm = lib.alertDialog({
                             header = 'Reset Specialization',
-                            content = 'Are you sure you want to reset your specialization?' .. 
-                                      (data.resetCost > 0 and ('\n\nCost: $' .. data.resetCost) or ''),
+                            content = 'Are you sure?' .. (data.resetCost > 0 and ('\n\nCost: $' .. data.resetCost) or ''),
                             centered = true,
                             cancel = true
                         })
                         
                         if confirm == 'confirm' then
-                            lib.callback('crafting:resetSpecialization', false, function(success, error)
+                            lib.callback('crafting:resetSpecialization', false, function(success)
                                 if success then
                                     ShowNotification('Specialization', 'Specialization reset!', 'success')
                                 else
-                                    ShowNotification('Specialization', error or 'Failed to reset', 'error')
+                                    ShowNotification('Specialization', 'Failed to reset', 'error')
                                 end
                             end)
                         end
@@ -526,19 +564,13 @@ function OpenSpecializationMenu()
         else
             table.insert(contextMenu, {
                 title = '⭐ Choose Your Specialization',
-                description = 'Each specialization provides bonuses to specific categories',
+                description = 'Each provides bonuses to specific categories',
                 icon = 'fa-solid fa-star',
                 disabled = true
             })
             
-            table.insert(contextMenu, {
-                title = '━━━━━━━━━━━━━━━━',
-                disabled = true
-            })
-            
             for specId, specConfig in pairs(Config.Specializations) do
-                local bonusText = '+' .. math.floor(specConfig.xpBonus * 100) .. '% XP in: ' .. 
-                                  table.concat(specConfig.bonusCategories, ', ')
+                local bonusText = '+' .. math.floor(specConfig.xpBonus * 100) .. '% XP in: ' .. table.concat(specConfig.bonusCategories, ', ')
                 
                 table.insert(contextMenu, {
                     title = specConfig.label,
@@ -547,19 +579,17 @@ function OpenSpecializationMenu()
                     onSelect = function()
                         local confirm = lib.alertDialog({
                             header = 'Choose ' .. specConfig.label .. '?',
-                            content = specConfig.description .. '\n\n' ..
-                                      '✅ Bonus: ' .. table.concat(specConfig.bonusCategories, ', ') .. '\n' ..
-                                      '⚠️ Reduced: ' .. table.concat(specConfig.penaltyCategories, ', '),
+                            content = specConfig.description,
                             centered = true,
                             cancel = true
                         })
                         
                         if confirm == 'confirm' then
-                            lib.callback('crafting:selectSpecialization', false, function(success, error)
+                            lib.callback('crafting:selectSpecialization', false, function(success)
                                 if success then
                                     ShowNotification('Specialization', 'You are now a ' .. specConfig.label .. '!', 'success')
                                 else
-                                    ShowNotification('Specialization', error or 'Failed to select', 'error')
+                                    ShowNotification('Specialization', 'Failed to select', 'error')
                                 end
                             end, specId)
                         end
@@ -602,28 +632,17 @@ function StartCrafting(station, recipeId, recipe, amount)
     local success = true
     
     if Config.UseSkillCheck and recipe.skillCheck then
-        ShowNotification('Crafting', 'Starting craft...', 'info')
-        
         if lib.progressCircle({
             duration = totalTime,
             label = 'Crafting ' .. recipe.label .. ' (' .. amount .. 'x)',
             position = 'bottom',
             useWhileDead = false,
             canCancel = true,
-            disable = {
-                move = true,
-                car = true,
-                combat = true
-            }
+            disable = {move = true, car = true, combat = true}
         }) then
             success = lib.skillCheck(recipe.skillCheck, {'w', 'a', 's', 'd'})
-            
-            if not success then
-                ShowNotification('Crafting Failed', 'You failed the skill check!', 'error')
-            end
         else
             success = false
-            ShowNotification('Crafting Cancelled', 'You cancelled the crafting process', 'error')
         end
     else
         if not lib.progressCircle({
@@ -632,14 +651,9 @@ function StartCrafting(station, recipeId, recipe, amount)
             position = 'bottom',
             useWhileDead = false,
             canCancel = true,
-            disable = {
-                move = true,
-                car = true,
-                combat = true
-            }
+            disable = {move = true, car = true, combat = true}
         }) then
             success = false
-            ShowNotification('Crafting Cancelled', 'You cancelled the crafting process', 'error')
         end
     end
     
@@ -648,48 +662,76 @@ function StartCrafting(station, recipeId, recipe, amount)
     lastCraftTime = GetGameTimer()
     
     if success then
-        -- Pass station coords for server-side validation
         TriggerServerEvent('crafting:attemptCraft', recipeId, amount, station.type, station.coords)
+    else
+        ShowNotification('Crafting', 'Cancelled', 'error')
     end
 end
 
--- ====================== STATION INTERACTIONS ======================
+-- ====================== STATION SETUP ======================
 local function SetupStations()
     -- Clear existing
     for _, blip in ipairs(craftingBlips) do
         RemoveBlip(blip)
     end
     craftingBlips = {}
+    ClearAllProps()
     
     -- Remove old zones
-    exports.ox_target:removeZone('crafting_station_')
+    for i = 1, 100 do
+        exports.ox_target:removeZone('crafting_station_config_' .. i)
+        exports.ox_target:removeZone('crafting_station_dynamic_' .. i)
+    end
     
     local allStations = {}
     
+    -- Add config stations
     for i, station in ipairs(Config.CraftingStations) do
-        table.insert(allStations, {index = 'config_' .. i, station = station})
+        table.insert(allStations, {index = 'config_' .. i, station = station, isConfig = true})
     end
     
+    -- Add dynamic stations
     for i, station in ipairs(dynamicStations) do
-        table.insert(allStations, {index = 'dynamic_' .. i, station = station})
+        table.insert(allStations, {index = 'dynamic_' .. i, station = station, isConfig = false})
     end
     
     for _, data in ipairs(allStations) do
         local i = data.index
         local station = data.station
+        local stationConfig = Config.StationTypes[station.type]
         
-        local stationName = 'crafting_station_' .. i
+        if not stationConfig then
+            print('[Crafting] Unknown station type: ' .. tostring(station.type))
+            goto continue
+        end
+        
+        -- Spawn prop
+        local shouldSpawnProp = Config.SpawnStationProps
+        if data.isConfig and station.spawnProp == false then
+            shouldSpawnProp = false
+        end
+        
+        if shouldSpawnProp and station.prop then
+            local offset = station.propOffset or stationConfig.propOffset or vector3(0.0, 0.0, -1.0)
+            local prop = SpawnProp(station.prop, station.coords, station.heading, offset)
+            if prop then
+                craftingProps[i] = prop
+            end
+        end
+        
+        -- Create target zone
+        local targetSize = stationConfig.targetSize or vector3(2.0, 1.5, 1.5)
         
         exports.ox_target:addBoxZone({
             coords = station.coords,
-            size = vec3(2.0, 2.0, 2.0),
+            size = targetSize,
             rotation = station.heading or 0.0,
             debug = Config.EnableDebug,
             options = {
                 {
-                    name = stationName,
-                    label = Config.StationTypes[station.type].label,
-                    icon = Config.StationTypes[station.type].icon,
+                    name = 'crafting_station_' .. i,
+                    label = station.label or stationConfig.label,
+                    icon = stationConfig.icon,
                     distance = Config.CraftingDistance,
                     onSelect = function()
                         OpenCraftingMenu(station)
@@ -698,6 +740,7 @@ local function SetupStations()
             }
         })
         
+        -- Create blip
         if Config.ShowBlips and station.blip then
             local blip = AddBlipForCoord(station.coords.x, station.coords.y, station.coords.z)
             SetBlipSprite(blip, Config.BlipSprite)
@@ -705,43 +748,51 @@ local function SetupStations()
             SetBlipScale(blip, Config.BlipScale)
             SetBlipAsShortRange(blip, true)
             BeginTextCommandSetBlipName("STRING")
-            AddTextComponentString(station.label or Config.StationTypes[station.type].label)
+            AddTextComponentString(station.label or stationConfig.label)
             EndTextCommandSetBlipName(blip)
             table.insert(craftingBlips, blip)
         end
+        
+        ::continue::
+    end
+    
+    if Config.EnableDebug then
+        print('[Crafting] Setup ' .. #allStations .. ' stations')
     end
 end
 
--- ====================== ADMIN STATION MANAGEMENT ======================
-local function GetClosestStation()
-    local ped = PlayerPedId()
-    local pCoords = GetEntityCoords(ped)
-    local closest = nil
-    local closestDist = 999999.0
-    
-    for i, station in ipairs(dynamicStations) do
-        local dist = #(pCoords - station.coords)
-        if dist < closestDist then
-            closestDist = dist
-            closest = {index = i, station = station, distance = dist}
-        end
-    end
-    
-    return closest
-end
-
+-- ====================== ADMIN: CREATE STATION ======================
 RegisterNetEvent('crafting:admin:createStation', function(stationType)
     local ped = PlayerPedId()
     local pCoords = GetEntityCoords(ped)
     local heading = GetEntityHeading(ped)
     
-    local input = lib.inputDialog('Create Crafting Station', {
+    local stationConfig = Config.StationTypes[stationType]
+    if not stationConfig then
+        ShowNotification('Error', 'Invalid station type', 'error')
+        return
+    end
+    
+    -- Build prop options from config
+    local propOptions = {}
+    for _, propData in ipairs(stationConfig.props) do
+        table.insert(propOptions, {value = propData.model, label = propData.label})
+    end
+    
+    local input = lib.inputDialog('Create ' .. stationConfig.label, {
         {
             type = 'input',
             label = 'Station Label',
             description = 'Name for this station',
-            default = Config.StationTypes[stationType].label,
+            default = stationConfig.label,
             required = true
+        },
+        {
+            type = 'select',
+            label = 'Prop Model',
+            description = 'Physical object to spawn',
+            options = propOptions,
+            default = stationConfig.defaultProp
         },
         {
             type = 'checkbox',
@@ -750,12 +801,22 @@ RegisterNetEvent('crafting:admin:createStation', function(stationType)
             checked = false
         },
         {
-            type = 'number',
+            type = 'slider',
             label = 'Heading',
-            description = 'Station rotation',
+            description = 'Rotation (0-360)',
             default = math.floor(heading),
             min = 0,
-            max = 360
+            max = 360,
+            step = 5
+        },
+        {
+            type = 'slider',
+            label = 'Height Offset',
+            description = 'Adjust prop height',
+            default = 0,
+            min = -20,
+            max = 20,
+            step = 1
         }
     })
     
@@ -763,11 +824,33 @@ RegisterNetEvent('crafting:admin:createStation', function(stationType)
     
     local stationData = {
         type = stationType,
-        coords = pCoords,
-        heading = input[3],
-        blip = input[2],
-        label = input[1]
+        coords = vector3(pCoords.x, pCoords.y, pCoords.z),
+        heading = input[4],
+        blip = input[3],
+        label = input[1],
+        prop = input[2],
+        propOffset = vector3(0.0, 0.0, (input[5] / 10) - 1.0)
     }
+    
+    -- Preview the prop
+    local previewProp = SpawnProp(stationData.prop, stationData.coords, stationData.heading, stationData.propOffset)
+    
+    local confirmInput = lib.alertDialog({
+        header = 'Confirm Station Placement',
+        content = 'Station: ' .. stationData.label .. '\nProp: ' .. stationData.prop .. '\n\nLooks good?',
+        centered = true,
+        cancel = true
+    })
+    
+    -- Delete preview prop
+    if previewProp then
+        DeleteProp(previewProp)
+    end
+    
+    if confirmInput ~= 'confirm' then
+        ShowNotification('Cancelled', 'Station creation cancelled', 'info')
+        return
+    end
     
     ShowNotification('Crafting Station', 'Saving station...', 'info')
     
@@ -780,6 +863,7 @@ RegisterNetEvent('crafting:admin:createStation', function(stationType)
     end, stationData)
 end)
 
+-- ====================== ADMIN: MANAGE STATIONS ======================
 RegisterNetEvent('crafting:admin:openManagement', function()
     lib.callback('crafting:admin:getAllStations', false, function(allStations)
         if not allStations then
@@ -796,18 +880,31 @@ RegisterNetEvent('crafting:admin:openManagement', function()
             icon = 'fa-solid fa-chart-bar'
         })
         
+        -- Quick create buttons
         table.insert(contextMenu, {
-            title = '➕ Create New Station',
-            description = 'Use /addcraftstation [type]',
-            disabled = true,
-            icon = 'fa-solid fa-plus'
+            title = '➕ Create Station Here',
+            description = 'Select a station type',
+            icon = 'fa-solid fa-plus',
+            arrow = true,
+            onSelect = function()
+                local typeOptions = {}
+                for typeId, typeConfig in pairs(Config.StationTypes) do
+                    table.insert(typeOptions, {value = typeId, label = typeConfig.label})
+                end
+                
+                local input = lib.inputDialog('Select Station Type', {
+                    {type = 'select', label = 'Station Type', options = typeOptions, required = true}
+                })
+                
+                if input and input[1] then
+                    TriggerEvent('crafting:admin:createStation', input[1])
+                end
+            end
         })
         
-        table.insert(contextMenu, {
-            title = '━━━━━━━━━━━━━━━━',
-            disabled = true
-        })
+        table.insert(contextMenu, {title = '━━━━━━━━━━━━━━━━', disabled = true})
         
+        -- Group by type
         local grouped = {}
         for _, station in ipairs(allStations) do
             if not grouped[station.type] then
@@ -817,15 +914,17 @@ RegisterNetEvent('crafting:admin:openManagement', function()
         end
         
         for stationType, stations in pairs(grouped) do
-            table.insert(contextMenu, {
-                title = Config.StationTypes[stationType].label .. ' (' .. #stations .. ')',
-                description = 'View all ' .. stationType .. ' stations',
-                icon = Config.StationTypes[stationType].icon,
-                arrow = true,
-                onSelect = function()
-                    OpenStationTypeMenu(stationType, stations)
-                end
-            })
+            local stationConfig = Config.StationTypes[stationType]
+            if stationConfig then
+                table.insert(contextMenu, {
+                    title = stationConfig.label .. ' (' .. #stations .. ')',
+                    icon = stationConfig.icon,
+                    arrow = true,
+                    onSelect = function()
+                        OpenStationTypeMenu(stationType, stations)
+                    end
+                })
+            end
         end
         
         lib.registerContext({
@@ -840,27 +939,19 @@ end)
 
 function OpenStationTypeMenu(stationType, stations)
     local contextMenu = {}
+    local ped = PlayerPedId()
+    local pCoords = GetEntityCoords(ped)
     
     for _, station in ipairs(stations) do
-        local isDynamic = station.dynamic
-        local distText = ''
-        
-        local ped = PlayerPedId()
-        local pCoords = GetEntityCoords(ped)
         local dist = #(pCoords - station.coords)
-        distText = string.format('%.1fm away', dist)
+        local distText = string.format('%.1fm away', dist)
         
         table.insert(contextMenu, {
             title = station.label,
-            description = distText .. (isDynamic and ' • Dynamic' or ' • Config') .. '\nCoords: ' .. math.floor(station.coords.x) .. ', ' .. math.floor(station.coords.y),
-            icon = isDynamic and 'fa-solid fa-database' or 'fa-solid fa-file',
-            metadata = {
-                {label = 'Type', value = stationType},
-                {label = 'Heading', value = station.heading},
-                {label = 'Blip', value = station.blip and 'Yes' or 'No'}
-            },
-            arrow = isDynamic,
-            onSelect = isDynamic and function()
+            description = distText .. (station.dynamic and ' • Dynamic' or ' • Config'),
+            icon = station.dynamic and 'fa-solid fa-database' or 'fa-solid fa-file',
+            arrow = station.dynamic,
+            onSelect = station.dynamic and function()
                 OpenStationActions(station)
             end or nil
         })
@@ -880,17 +971,14 @@ function OpenStationActions(station)
     local contextMenu = {
         {
             title = '🗺️ Teleport to Station',
-            description = 'TP to this station location',
             icon = 'fa-solid fa-location-dot',
             onSelect = function()
                 SetEntityCoords(PlayerPedId(), station.coords.x, station.coords.y, station.coords.z)
-                SetEntityHeading(PlayerPedId(), station.heading)
-                ShowNotification('Teleport', 'Teleported to station', 'success')
+                ShowNotification('Teleport', 'Teleported!', 'success')
             end
         },
         {
             title = '📍 Set Waypoint',
-            description = 'Mark station on GPS',
             icon = 'fa-solid fa-map-pin',
             onSelect = function()
                 SetNewWaypoint(station.coords.x, station.coords.y)
@@ -899,12 +987,11 @@ function OpenStationActions(station)
         },
         {
             title = '🗑️ Delete Station',
-            description = 'Permanently remove this station',
             icon = 'fa-solid fa-trash',
             onSelect = function()
                 local confirm = lib.alertDialog({
                     header = 'Delete Station',
-                    content = 'Are you sure you want to delete this station? This cannot be undone.',
+                    content = 'Are you sure? This cannot be undone.',
                     centered = true,
                     cancel = true
                 })
@@ -914,7 +1001,7 @@ function OpenStationActions(station)
                         if success then
                             ShowNotification('Success', 'Station deleted', 'success')
                         else
-                            ShowNotification('Error', 'Failed to delete station', 'error')
+                            ShowNotification('Error', 'Failed to delete', 'error')
                         end
                     end, station.id)
                 end
@@ -933,21 +1020,27 @@ function OpenStationActions(station)
 end
 
 RegisterNetEvent('crafting:admin:deleteNearest', function()
-    local closest = GetClosestStation()
+    local ped = PlayerPedId()
+    local pCoords = GetEntityCoords(ped)
+    local closest = nil
+    local closestDist = 999999.0
     
-    if not closest then
-        ShowNotification('Error', 'No dynamic stations nearby', 'error')
-        return
+    for i, station in ipairs(dynamicStations) do
+        local dist = #(pCoords - station.coords)
+        if dist < closestDist then
+            closestDist = dist
+            closest = station
+        end
     end
     
-    if closest.distance > 10.0 then
-        ShowNotification('Error', 'Nearest station is too far (' .. math.floor(closest.distance) .. 'm)', 'error')
+    if not closest or closestDist > 10.0 then
+        ShowNotification('Error', 'No dynamic station within 10m', 'error')
         return
     end
     
     local confirm = lib.alertDialog({
         header = 'Delete Station',
-        content = 'Delete "' .. closest.station.label .. '"?\n\nThis cannot be undone.',
+        content = 'Delete "' .. closest.label .. '"?',
         centered = true,
         cancel = true
     })
@@ -957,29 +1050,23 @@ RegisterNetEvent('crafting:admin:deleteNearest', function()
             if success then
                 ShowNotification('Success', 'Station deleted', 'success')
             else
-                ShowNotification('Error', 'Failed to delete station', 'error')
+                ShowNotification('Error', 'Failed to delete', 'error')
             end
-        end, closest.station.id)
+        end, closest.id)
     end
 end)
 
+-- ====================== EVENTS ======================
 RegisterNetEvent('crafting:updateStations', function(newDynamicStations)
     dynamicStations = newDynamicStations
     SetupStations()
 end)
 
--- ====================== EVENTS ======================
 RegisterNetEvent('crafting:craftResult', function(success, message, xpGained, levelUp, newLevel, xpBonuses, quality)
     if success then
         local description = message
         if xpGained then
             description = description .. '\n+' .. xpGained .. ' XP'
-            
-            if xpBonuses and #xpBonuses > 0 then
-                for _, bonus in ipairs(xpBonuses) do
-                    description = description .. ' (' .. bonus.name .. ')'
-                end
-            end
         end
         if levelUp then
             description = description .. '\n🎉 LEVEL UP! Now level ' .. newLevel
@@ -995,8 +1082,7 @@ RegisterNetEvent('crafting:blueprintUnlocked', function(recipeId, recipeLabel)
         title = '📜 Blueprint Learned!',
         description = 'You can now craft: ' .. recipeLabel,
         type = 'success',
-        duration = 5000,
-        position = 'top'
+        duration = 5000
     })
 end)
 
@@ -1005,6 +1091,7 @@ RegisterNetEvent('QBCore:Client:OnPlayerLoaded', function()
 end)
 
 RegisterNetEvent('QBCore:Client:OnPlayerUnload', function()
+    ClearAllProps()
     for _, blip in ipairs(craftingBlips) do
         RemoveBlip(blip)
     end
@@ -1013,17 +1100,14 @@ end)
 
 -- ====================== INITIALIZATION ======================
 CreateThread(function()
-    if QBCore.Functions.GetPlayerData() and QBCore.Functions.GetPlayerData().citizenid then
-        SetupStations()
-    end
+    while not QBCore do Wait(100) end
+    while not QBCore.Functions.GetPlayerData().citizenid do Wait(100) end
+    SetupStations()
 end)
 
 AddEventHandler('onResourceStop', function(resourceName)
     if resourceName ~= GetCurrentResourceName() then return end
-    
-    lib.hideTextUI()
-    StopCraftingAnimation()
-    
+    ClearAllProps()
     for _, blip in ipairs(craftingBlips) do
         RemoveBlip(blip)
     end

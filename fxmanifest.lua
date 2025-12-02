@@ -3,9 +3,8 @@ game 'gta5'
 
 name 'kurai-crafting'
 author 'Kurai.Dev'
-description 'Advanced Progression Crafting System v3.0 - The Definitive Crafting Solution'
+description 'Advanced Progression Crafting System v3.0 - The Definitive Solution'
 version '3.0.0'
-repository 'https://github.com/kurai-dev/kurai-crafting'
 
 lua54 'yes'
 
@@ -29,8 +28,4 @@ dependencies {
     'ox_lib',
     'ox_target',
     'oxmysql'
-}
-
-provides {
-    'crafting'
 }

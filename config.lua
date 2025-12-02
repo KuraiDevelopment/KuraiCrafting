@@ -23,56 +23,154 @@ Config.SpecializationsTable = 'crafting_specializations'
 Config.AdminGroup = 'admin'
 Config.EnableDebug = false
 
--- ====================== STATION CATEGORIES ======================
+-- ====================== PROP SETTINGS ======================
+Config.SpawnStationProps = true        -- Enable/disable prop spawning globally
+Config.PropDrawDistance = 100.0        -- Distance at which props are visible
+Config.UseTargetOnProp = true          -- Target the prop model vs invisible zone
+
+-- ====================== STATION TYPES ======================
 Config.StationTypes = {
     workbench = {
         label = 'Workbench',
         icon = 'fa-solid fa-hammer',
-        categories = {'basic', 'tools', 'components'}
+        categories = {'basic', 'tools', 'components'},
+        defaultProp = 'prop_tool_bench02',
+        propOffset = vector3(0.0, 0.0, -1.0),
+        targetSize = vector3(2.0, 1.5, 1.5),
+        props = {
+            {model = 'prop_tool_bench02', label = 'Tool Bench'},
+            {model = 'prop_toolchest_05', label = 'Tool Chest'},
+            {model = 'gr_prop_gr_bench_04a', label = 'Garage Bench'},
+            {model = 'prop_tool_bench02_ld', label = 'Light Duty Bench'},
+            {model = 'prop_toolchest_04', label = 'Rolling Tool Chest'},
+            {model = 'prop_toolchest_02', label = 'Red Tool Chest'}
+        }
     },
     electronics_bench = {
         label = 'Electronics Bench',
         icon = 'fa-solid fa-microchip',
-        categories = {'electronics', 'components'}
+        categories = {'electronics', 'components'},
+        defaultProp = 'hei_prop_hei_fib_desk',
+        propOffset = vector3(0.0, 0.0, -1.0),
+        targetSize = vector3(2.0, 1.5, 1.5),
+        props = {
+            {model = 'hei_prop_hei_fib_desk', label = 'Tech Desk'},
+            {model = 'prop_tool_bench02_ld', label = 'Light Bench'},
+            {model = 'prop_laptop_01a', label = 'Laptop Setup'},
+            {model = 'hei_heist_kit_bin_01', label = 'Equipment Bin'}
+        }
     },
     weapon_bench = {
         label = 'Weapon Bench',
         icon = 'fa-solid fa-gun',
-        categories = {'weapons', 'attachments', 'ammo'}
+        categories = {'weapons', 'attachments', 'ammo'},
+        defaultProp = 'gr_prop_bunker_bench_01a',
+        propOffset = vector3(0.0, 0.0, -1.0),
+        targetSize = vector3(2.5, 1.5, 1.5),
+        props = {
+            {model = 'gr_prop_bunker_bench_01a', label = 'Weapon Bench'},
+            {model = 'gr_prop_bunker_bench_02a', label = 'Weapon Bench Alt'},
+            {model = 'gr_prop_gr_bench_04a', label = 'Heavy Bench'},
+            {model = 'prop_toolchest_04', label = 'Ammo Chest'},
+            {model = 'gr_prop_bunker_crate_01a', label = 'Weapon Crate'}
+        }
     },
     medical_station = {
         label = 'Medical Station',
         icon = 'fa-solid fa-briefcase-medical',
-        categories = {'medical', 'chemistry'}
+        categories = {'medical', 'chemistry'},
+        defaultProp = 'v_med_medtrolley2',
+        propOffset = vector3(0.0, 0.0, -1.0),
+        targetSize = vector3(1.5, 1.5, 1.5),
+        props = {
+            {model = 'v_med_medtrolley2', label = 'Medical Trolley'},
+            {model = 'prop_med_bag_01', label = 'Medical Bag'},
+            {model = 'v_med_crtntable', label = 'Medical Table'},
+            {model = 'prop_defilied_ragdoll_01', label = 'First Aid Station'}
+        }
     },
     cooking_station = {
         label = 'Cooking Station',
         icon = 'fa-solid fa-fire-burner',
-        categories = {'food', 'drinks'}
+        categories = {'food', 'drinks'},
+        defaultProp = 'prop_cooker_03',
+        propOffset = vector3(0.0, 0.0, -1.0),
+        targetSize = vector3(1.5, 1.5, 1.5),
+        props = {
+            {model = 'prop_cooker_03', label = 'Cooker/Stove'},
+            {model = 'prop_gas_cooker01', label = 'Gas Cooker'},
+            {model = 'prop_bbq_3', label = 'BBQ Grill'},
+            {model = 'v_res_tre_fridge', label = 'Fridge'}
+        }
     }
 }
 
--- ====================== CRAFTING STATIONS ======================
+-- ====================== CONFIG STATIONS (Permanent) ======================
+-- Set spawnProp = false for stations inside MLOs that already have furniture
 Config.CraftingStations = {
-    -- Workbenches (Public)
-    {type = 'workbench', coords = vector3(-268.0, -956.0, 31.2), heading = 0.0, blip = true, label = 'Public Workbench'},
-    {type = 'workbench', coords = vector3(1275.0, -1710.0, 54.8), heading = 180.0, blip = true, label = 'Workshop'},
-    
-    -- Electronics (Specialized)
-    {type = 'electronics_bench', coords = vector3(2747.0, 3472.0, 55.7), heading = 90.0, blip = false, label = 'Electronics Lab'},
-    
-    -- Weapon Benches (Hidden/Gang)
-    {type = 'weapon_bench', coords = vector3(1087.0, -3099.0, -39.0), heading = 270.0, blip = false, label = 'Underground Workshop'},
-    
-    -- Medical Stations
-    {type = 'medical_station', coords = vector3(304.0, -595.0, 43.3), heading = 0.0, blip = true, label = 'Hospital Lab'},
-    
-    -- Cooking Stations
-    {type = 'cooking_station', coords = vector3(216.0, -1398.0, 30.6), heading = 140.0, blip = false, label = 'Restaurant Kitchen'}
+    {
+        type = 'workbench',
+        coords = vector3(-268.0, -956.0, 31.2),
+        heading = 0.0,
+        blip = true,
+        label = 'Public Workbench',
+        spawnProp = true,
+        prop = 'prop_tool_bench02',
+        propOffset = vector3(0.0, 0.0, -1.0)
+    },
+    {
+        type = 'workbench',
+        coords = vector3(1275.0, -1710.0, 54.8),
+        heading = 180.0,
+        blip = true,
+        label = 'Workshop',
+        spawnProp = true,
+        prop = 'prop_tool_bench02',
+        propOffset = vector3(0.0, 0.0, -1.0)
+    },
+    {
+        type = 'electronics_bench',
+        coords = vector3(2747.0, 3472.0, 55.7),
+        heading = 90.0,
+        blip = false,
+        label = 'Electronics Lab',
+        spawnProp = true,
+        prop = 'hei_prop_hei_fib_desk',
+        propOffset = vector3(0.0, 0.0, -1.0)
+    },
+    {
+        type = 'weapon_bench',
+        coords = vector3(1087.0, -3099.0, -39.0),
+        heading = 270.0,
+        blip = false,
+        label = 'Underground Workshop',
+        spawnProp = true,
+        prop = 'gr_prop_bunker_bench_01a',
+        propOffset = vector3(0.0, 0.0, -1.0)
+    },
+    {
+        type = 'medical_station',
+        coords = vector3(304.0, -595.0, 43.3),
+        heading = 0.0,
+        blip = true,
+        label = 'Hospital Lab',
+        spawnProp = false,  -- Inside hospital MLO
+        prop = nil,
+        propOffset = vector3(0.0, 0.0, 0.0)
+    },
+    {
+        type = 'cooking_station',
+        coords = vector3(216.0, -1398.0, 30.6),
+        heading = 140.0,
+        blip = false,
+        label = 'Restaurant Kitchen',
+        spawnProp = true,
+        prop = 'prop_cooker_03',
+        propOffset = vector3(0.0, 0.0, -1.0)
+    }
 }
 
 -- ====================== PROGRESSION SYSTEM ======================
--- XP formula: (level^1.5) * 100 + 200
 Config.Progression = {
     {level = 0,   label = 'Novice',        color = '#AAAAAA'},
     {level = 5,   label = 'Apprentice',    color = '#4CAF50'},
@@ -84,21 +182,20 @@ Config.Progression = {
     {level = 100, label = 'Legendary',     color = '#00FFFF'}
 }
 
--- XP Multipliers
 Config.XPMultipliers = {
     base = 1.0,
-    groupBonus = 0.1,        -- Per nearby player (max 3)
-    qualityBonus = 0.25,     -- For quality crafts
-    firstTimeBonus = 2.0,    -- First time crafting a recipe
-    streakBonus = 0.05,      -- Per consecutive craft (max 10)
-    specializationBonus = 0.25  -- When crafting in your specialization
+    groupBonus = 0.1,
+    qualityBonus = 0.25,
+    firstTimeBonus = 2.0,
+    streakBonus = 0.05,
+    specializationBonus = 0.25
 }
 
 -- ====================== SPECIALIZATION SYSTEM ======================
 Config.EnableSpecializations = true
-Config.SpecializationUnlockLevel = 10  -- Level required to pick a specialization
+Config.SpecializationUnlockLevel = 10
 Config.AllowSpecializationReset = true
-Config.SpecializationResetCost = 5000  -- In-game currency cost to reset
+Config.SpecializationResetCost = 5000
 
 Config.Specializations = {
     blacksmith = {
@@ -107,11 +204,11 @@ Config.Specializations = {
         description = 'Master of metalworking and tool creation',
         color = '#8B4513',
         bonusCategories = {'tools', 'components', 'basic'},
-        xpBonus = 0.25,           -- 25% more XP in bonus categories
-        successBonus = 0.10,      -- 10% better success rate
-        qualityBonus = 0.15,      -- 15% better quality chance
+        xpBonus = 0.25,
+        successBonus = 0.10,
+        qualityBonus = 0.15,
         penaltyCategories = {'electronics', 'chemistry'},
-        xpPenalty = 0.15          -- 15% less XP in penalty categories
+        xpPenalty = 0.15
     },
     engineer = {
         label = 'Engineer',
@@ -165,9 +262,8 @@ Config.Specializations = {
 
 -- ====================== BLUEPRINT SYSTEM ======================
 Config.EnableBlueprints = true
-Config.ShowLockedRecipes = true  -- Show recipes player doesn't have blueprints for
+Config.ShowLockedRecipes = true
 
--- Blueprint rarity affects drop rates and purchase prices
 Config.BlueprintRarity = {
     common = {color = '#AAAAAA', dropRate = 0.15, basePrice = 500},
     uncommon = {color = '#4CAF50', dropRate = 0.08, basePrice = 1500},
@@ -176,17 +272,16 @@ Config.BlueprintRarity = {
     legendary = {color = '#FF9800', dropRate = 0.005, basePrice = 50000}
 }
 
--- ====================== TOOL DURABILITY SYSTEM ======================
+-- ====================== TOOL DURABILITY ======================
 Config.EnableToolDurability = true
 Config.ShowToolDurability = true
 Config.ToolBreakNotification = true
 
--- Tool definitions with max durability
 Config.Tools = {
     hammer = {
         label = 'Hammer',
         maxDurability = 100,
-        degradePerUse = 2,      -- Base degradation per craft
+        degradePerUse = 2,
         repairItem = 'metalscrap',
         repairAmount = 2,
         repairRestores = 25
@@ -232,65 +327,32 @@ Config.BaseFailureChance = 0.05
 Config.QualitySystem = true
 Config.RequireTools = true
 
--- Level-based failure reduction (masters fail less)
 Config.LevelFailureReduction = {
     enabled = true,
-    reductionPerLevel = 0.003,  -- 0.3% reduction per level
-    maxReduction = 0.80         -- Maximum 80% reduction at high levels
+    reductionPerLevel = 0.003,
+    maxReduction = 0.80
 }
 
--- Quality chances (base, modified by level and specialization)
 Config.QualityChances = {
-    excellent = {baseChance = 0.05, levelBonus = 0.002},  -- +0.2% per level
-    fine = {baseChance = 0.20, levelBonus = 0.003}        -- +0.3% per level
+    excellent = {baseChance = 0.05, levelBonus = 0.002},
+    fine = {baseChance = 0.20, levelBonus = 0.003}
 }
 
--- Cooldowns (seconds)
 Config.GlobalCooldown = 1
 Config.RecipeCooldown = 5
 
--- ====================== CRAFTING QUEUE ======================
-Config.EnableCraftingQueue = true
-Config.MaxQueueSize = 10
-Config.QueueProcessInterval = 100  -- ms between queue checks
-
 -- ====================== ANIMATIONS ======================
 Config.Animations = {
-    workbench = {
-        dict = 'mini@repair',
-        anim = 'fixing_a_ped',
-        flag = 1
-    },
-    electronics_bench = {
-        dict = 'anim@amb@clubhouse@tutorial@bkr_tut_ig3@',
-        anim = 'machinic_loop_mechandplayer',
-        flag = 1
-    },
-    weapon_bench = {
-        dict = 'mini@repair',
-        anim = 'fixing_a_ped',
-        flag = 1
-    },
-    medical_station = {
-        dict = 'mini@sprunk',
-        anim = 'plyr_buy_drink_pt1',
-        flag = 1
-    },
-    cooking_station = {
-        dict = 'anim@amb@clubhouse@tutorial@bkr_tut_ig3@',
-        anim = 'machinic_loop_mechandplayer',
-        flag = 1
-    }
+    workbench = {dict = 'mini@repair', anim = 'fixing_a_ped', flag = 1},
+    electronics_bench = {dict = 'anim@amb@clubhouse@tutorial@bkr_tut_ig3@', anim = 'machinic_loop_mechandplayer', flag = 1},
+    weapon_bench = {dict = 'mini@repair', anim = 'fixing_a_ped', flag = 1},
+    medical_station = {dict = 'mini@sprunk', anim = 'plyr_buy_drink_pt1', flag = 1},
+    cooking_station = {dict = 'anim@amb@clubhouse@tutorial@bkr_tut_ig3@', anim = 'machinic_loop_mechandplayer', flag = 1}
 }
 
 -- ====================== UI SETTINGS ======================
 Config.DisableControlsWhileCrafting = true
-Config.ShowProgressBar = true
-Config.ShowIngredients = true
-Config.ShowRequiredLevel = true
-Config.PlaySoundEffects = true
 Config.EnableRecipeSearch = true
-Config.RecipesPerPage = 10
 
 -- ====================== BLIP SETTINGS ======================
 Config.ShowBlips = true
@@ -300,7 +362,7 @@ Config.BlipScale = 0.7
 
 -- ====================== SECURITY ======================
 Config.ServerSideValidation = true
-Config.StationProximityCheck = 10.0  -- Max distance for station validation
+Config.StationProximityCheck = 10.0
 Config.AntiExploit = {
     enabled = true,
     maxCraftsPerMinute = 30,

@@ -21,7 +21,7 @@ Config.SpecializationsTable = 'crafting_specializations'
 
 -- ====================== ADMIN ======================
 Config.AdminGroup = 'admin'
-Config.EnableDebug = false
+Config.EnableDebug = true  -- Temporarily enabled to diagnose prop loading issues
 
 -- ====================== PROP SETTINGS ======================
 Config.SpawnStationProps = true        -- Enable/disable prop spawning globally

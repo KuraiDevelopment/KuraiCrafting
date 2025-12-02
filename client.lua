@@ -16,13 +16,18 @@ local cachedPlayerData = nil
 
 -- ====================== MODEL LOADING ======================
 local function LoadModel(model)
-    if type(model) ~= 'string' then return nil end
-    
-    local hash = GetHashKey(model)
-    
-    if not IsModelValid(hash) then
+    if type(model) ~= 'string' and type(model) ~= 'number' then 
         if Config.EnableDebug then
-            print('[Crafting] Invalid model: ' .. model)
+            print('[Crafting] Invalid model type: ' .. type(model))
+        end
+        return nil 
+    end
+    
+    local hash = type(model) == 'number' and model or GetHashKey(model)
+    
+    if not IsModelInCdimage(hash) then
+        if Config.EnableDebug then
+            print('[Crafting] Model not in game files: ' .. tostring(model))
         end
         return nil
     end
@@ -35,8 +40,12 @@ local function LoadModel(model)
     end
     
     if not HasModelLoaded(hash) then
-        print('[Crafting] Failed to load model: ' .. model)
+        print('[Crafting] Failed to load model after 100 attempts: ' .. tostring(model))
         return nil
+    end
+    
+    if Config.EnableDebug then
+        print('[Crafting] Successfully loaded model: ' .. tostring(model))
     end
     
     return hash
@@ -45,10 +54,23 @@ end
 -- ====================== PROP MANAGEMENT ======================
 local function SpawnProp(model, coords, heading, offset)
     if not Config.SpawnStationProps then return nil end
-    if not model then return nil end
+    if not model then 
+        if Config.EnableDebug then
+            print('[Crafting] No model provided to SpawnProp')
+        end
+        return nil 
+    end
+    
+    if Config.EnableDebug then
+        print('[Crafting] Attempting to spawn prop: ' .. tostring(model))
+        print('[Crafting] Coords: ' .. tostring(coords))
+    end
     
     local modelHash = LoadModel(model)
-    if not modelHash then return nil end
+    if not modelHash then 
+        print('[Crafting] ERROR: Could not load model hash for: ' .. tostring(model))
+        return nil 
+    end
     
     offset = offset or vector3(0.0, 0.0, -1.0)
     
@@ -58,24 +80,37 @@ local function SpawnProp(model, coords, heading, offset)
         coords.z + offset.z
     )
     
-    local prop = CreateObject(modelHash, propCoords.x, propCoords.y, propCoords.z, false, false, false)
+    -- Create the object with network control
+    local prop = CreateObject(modelHash, propCoords.x, propCoords.y, propCoords.z, false, true, false)
     
-    if DoesEntityExist(prop) then
-        SetEntityHeading(prop, heading or 0.0)
-        FreezeEntityPosition(prop, true)
-        SetEntityCollision(prop, true, true)
-        SetEntityInvincible(prop, true)
+    if not DoesEntityExist(prop) then
+        print('[Crafting] ERROR: Failed to create prop entity for: ' .. tostring(model))
         SetModelAsNoLongerNeeded(modelHash)
-        
-        if Config.EnableDebug then
-            print('[Crafting] Spawned prop: ' .. model .. ' at ' .. tostring(propCoords))
-        end
-        
-        return prop
+        return nil
     end
     
+    -- Wait a frame for the entity to fully initialize
+    Wait(0)
+    
+    -- Set prop properties
+    SetEntityHeading(prop, heading or 0.0)
+    FreezeEntityPosition(prop, true)
+    SetEntityCollision(prop, true, true)
+    SetEntityInvincible(prop, true)
+    SetEntityAsMissionEntity(prop, true, true)
+    
+    -- Make sure it's visible
+    SetEntityVisible(prop, true, false)
+    SetEntityAlpha(prop, 255, false)
+    
     SetModelAsNoLongerNeeded(modelHash)
-    return nil
+    
+    if Config.EnableDebug then
+        print('[Crafting] Successfully spawned prop: ' .. tostring(model) .. ' (Entity ID: ' .. prop .. ')')
+        print('[Crafting] Prop coords: ' .. tostring(propCoords))
+    end
+    
+    return prop
 end
 
 local function DeleteProp(prop)
@@ -515,14 +550,24 @@ end
 local function UpdatePreviewProp(model, coords, heading, heightOffset)
     CleanupPreviewProp()
     
+    if Config.EnableDebug then
+        print('[Crafting] Creating preview prop: ' .. tostring(model))
+    end
+    
     local offset = vector3(0.0, 0.0, heightOffset / 10.0 - 1.0)
     previewProp = SpawnProp(model, coords, heading, offset)
     
     if previewProp and DoesEntityExist(previewProp) then
         SetEntityAlpha(previewProp, 200, false)
         SetEntityCollision(previewProp, false, false)
+        
+        if Config.EnableDebug then
+            print('[Crafting] Preview prop created successfully')
+        end
         return true
     end
+    
+    print('[Crafting] ERROR: Failed to create preview prop for model: ' .. tostring(model))
     return false
 end
 

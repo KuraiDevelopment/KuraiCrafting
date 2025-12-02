@@ -86,46 +86,6 @@ local fallbackProps = {
     'prop_chair_01a'
 }
 
-local function SpawnPropWithFallback(model, coords, heading, offset, stationType)
-    -- Try primary model first
-    local prop = SpawnProp(model, coords, heading, offset)
-    if prop then return prop end
-    
-    -- If primary failed and we have a station type, try station-specific fallbacks
-    if stationType and Config.StationTypes[stationType] then
-        local stationConfig = Config.StationTypes[stationType]
-        if stationConfig.props then
-            print('[Crafting] Primary prop failed, trying station alternatives...')
-            for _, propData in ipairs(stationConfig.props) do
-                if propData.model ~= model then
-                    print('[Crafting] Trying alternative: ' .. propData.model)
-                    prop = SpawnProp(propData.model, coords, heading, offset)
-                    if prop then
-                        print('[Crafting] Successfully spawned alternative prop: ' .. propData.model)
-                        return prop
-                    end
-                end
-            end
-        end
-    end
-    
-    -- Try universal fallbacks
-    print('[Crafting] All station props failed, trying universal fallbacks...')
-    for _, fallbackModel in ipairs(fallbackProps) do
-        if fallbackModel ~= model then
-            print('[Crafting] Trying fallback: ' .. fallbackModel)
-            prop = SpawnProp(fallbackModel, coords, heading, offset)
-            if prop then
-                print('[Crafting] Successfully spawned fallback prop: ' .. fallbackModel)
-                return prop
-            end
-        end
-    end
-    
-    print('[Crafting] ERROR: All prop spawn attempts failed for this station!')
-    return nil
-end
-
 local function SpawnProp(model, coords, heading, offset)
     if not Config.SpawnStationProps then return nil end
     if not model then 
@@ -185,6 +145,46 @@ local function SpawnProp(model, coords, heading, offset)
     end
     
     return prop
+end
+
+local function SpawnPropWithFallback(model, coords, heading, offset, stationType)
+    -- Try primary model first
+    local prop = SpawnProp(model, coords, heading, offset)
+    if prop then return prop end
+    
+    -- If primary failed and we have a station type, try station-specific fallbacks
+    if stationType and Config.StationTypes[stationType] then
+        local stationConfig = Config.StationTypes[stationType]
+        if stationConfig.props then
+            print('[Crafting] Primary prop failed, trying station alternatives...')
+            for _, propData in ipairs(stationConfig.props) do
+                if propData.model ~= model then
+                    print('[Crafting] Trying alternative: ' .. propData.model)
+                    prop = SpawnProp(propData.model, coords, heading, offset)
+                    if prop then
+                        print('[Crafting] Successfully spawned alternative prop: ' .. propData.model)
+                        return prop
+                    end
+                end
+            end
+        end
+    end
+    
+    -- Try universal fallbacks
+    print('[Crafting] All station props failed, trying universal fallbacks...')
+    for _, fallbackModel in ipairs(fallbackProps) do
+        if fallbackModel ~= model then
+            print('[Crafting] Trying fallback: ' .. fallbackModel)
+            prop = SpawnProp(fallbackModel, coords, heading, offset)
+            if prop then
+                print('[Crafting] Successfully spawned fallback prop: ' .. fallbackModel)
+                return prop
+            end
+        end
+    end
+    
+    print('[Crafting] ERROR: All prop spawn attempts failed for this station!')
+    return nil
 end
 
 local function DeleteProp(prop)
@@ -1141,4 +1141,15 @@ RegisterCommand('reloadstations', function()
     print('[Crafting] Reloading all stations...')
     SetupStations()
     print('[Crafting] Stations reloaded!')
+end)
+
+RegisterCommand('cancelplacement', function()
+    if isPlacingStation then
+        print('[Crafting] Force cancelling placement mode...')
+        isPlacingStation = false
+        CleanupPreviewProp()
+        ShowNotification('Cancelled', 'Placement mode cancelled', 'info')
+    else
+        print('[Crafting] Not in placement mode')
+    end
 end)

@@ -181,7 +181,154 @@ local function FormatToolDurability(toolName)
 end
 
 -- ====================== CRAFTING UI ======================
+local nuiOpen = false
+
 local function OpenCraftingMenu(station)
+    if not CanCraft() then return end
+    if nuiOpen then return end
+    
+    currentStation = station
+    
+    lib.callback('crafting:getAvailableRecipes', false, function(data)
+        if not data or not data.recipes then
+            ShowNotification('Crafting', 'Failed to load recipes', 'error')
+            return
+        end
+        
+        cachedPlayerData = data
+        nuiOpen = true
+        
+        -- Get specialization data
+        lib.callback('crafting:getSpecializations', false, function(specData)
+            data.specializationData = specData
+            
+            SetNuiFocus(true, true)
+            SendNUIMessage({
+                action = 'openCrafting',
+                station = station,
+                data = data
+            })
+        end)
+    end, station.type)
+end
+
+local function CloseCraftingMenu()
+    if not nuiOpen then return end
+    nuiOpen = false
+    SetNuiFocus(false, false)
+    SendNUIMessage({action = 'closeCrafting'})
+end
+
+-- NUI Callbacks
+RegisterNUICallback('uiReady', function(data, cb)
+    cb('ok')
+end)
+
+RegisterNUICallback('closeUI', function(data, cb)
+    CloseCraftingMenu()
+    cb('ok')
+end)
+
+RegisterNUICallback('craftItem', function(data, cb)
+    local recipeId = data.recipeId
+    local amount = data.amount
+    
+    if not cachedPlayerData or not cachedPlayerData.recipes[recipeId] then
+        cb('error')
+        return
+    end
+    
+    local recipe = cachedPlayerData.recipes[recipeId]
+    StartCrafting(currentStation, recipeId, recipe, amount)
+    cb('ok')
+end)
+
+RegisterNUICallback('openSpecialization', function(data, cb)
+    lib.callback('crafting:getSpecializations', false, function(specData)
+        SendNUIMessage({
+            action = 'openSpecialization',
+            data = specData
+        })
+    end)
+    cb('ok')
+end)
+
+RegisterNUICallback('selectSpecialization', function(data, cb)
+    lib.callback('crafting:selectSpecialization', false, function(success)
+        if success then
+            ShowNotification('Specialization', 'Specialization selected!', 'success')
+            -- Refresh UI data
+            lib.callback('crafting:getAvailableRecipes', false, function(newData)
+                lib.callback('crafting:getSpecializations', false, function(specData)
+                    newData.specializationData = specData
+                    SendNUIMessage({
+                        action = 'updateData',
+                        data = newData
+                    })
+                end)
+            end, currentStation.type)
+        else
+            ShowNotification('Specialization', 'Failed to select specialization', 'error')
+        end
+    end, data.specialization)
+    cb('ok')
+end)
+
+RegisterNUICallback('resetSpecialization', function(data, cb)
+    lib.callback('crafting:resetSpecialization', false, function(success)
+        if success then
+            ShowNotification('Specialization', 'Specialization reset!', 'success')
+            -- Refresh UI data
+            lib.callback('crafting:getAvailableRecipes', false, function(newData)
+                lib.callback('crafting:getSpecializations', false, function(specData)
+                    newData.specializationData = specData
+                    SendNUIMessage({
+                        action = 'updateData',
+                        data = newData
+                    })
+                end)
+            end, currentStation.type)
+        else
+            ShowNotification('Specialization', 'Failed to reset', 'error')
+        end
+    end)
+    cb('ok')
+end)
+
+-- Legacy compatibility - remove old context menu functions
+function OpenRecipeSearch(station, playerData)
+    -- Removed - now handled by NUI search
+end
+
+function OpenCategoryMenu(station, category, recipes, playerLevel, playerData)
+    -- Removed - now handled by NUI
+end
+
+function OpenRecipeMenu(station, recipeId, recipe)
+    -- Removed - now handled by NUI
+end
+
+function OpenSpecializationMenu()
+    -- Removed - now handled by NUI
+end
+
+-- Keep compatibility with old notification calls but also send to NUI
+local originalShowNotification = ShowNotification
+ShowNotification = function(title, description, type)
+    originalShowNotification(title, description, type)
+    if nuiOpen then
+        SendNUIMessage({
+            action = 'notify',
+            title = title,
+            message = description,
+            type = type
+        })
+    end
+end
+
+-- Deprecated context menu section
+--[[ OLD CONTEXT MENU CODE - KEEPING FOR REFERENCE
+local function OpenCraftingMenu_OLD(station)
     if not CanCraft() then return end
     
     currentStation = station
@@ -198,416 +345,7 @@ local function OpenCraftingMenu(station)
         local playerLevel = data.level
         local spec = data.specialization
         
-        -- Group recipes by category
-        local categories = {}
-        
-        for id, recipe in pairs(recipes) do
-            if not categories[recipe.category] then
-                categories[recipe.category] = {}
-            end
-            table.insert(categories[recipe.category], {id = id, recipe = recipe, locked = false})
-        end
-        
-        if Config.ShowLockedRecipes then
-            for id, lockedData in pairs(lockedRecipes) do
-                local recipe = lockedData.recipe
-                if not categories[recipe.category] then
-                    categories[recipe.category] = {}
-                end
-                table.insert(categories[recipe.category], {
-                    id = id,
-                    recipe = recipe,
-                    locked = true,
-                    lockReason = lockedData.reason
-                })
-            end
-        end
-        
-        local contextMenu = {}
-        
-        -- Player info header
-        local specText = spec and (' | ' .. Config.Specializations[spec.type].label) or ''
-        local progressPercent = math.floor((data.xp / data.nextLevelXP) * 100)
-        
-        table.insert(contextMenu, {
-            title = '📊 Level ' .. playerLevel .. ' ' .. data.title .. specText,
-            description = 'XP: ' .. data.xp .. '/' .. data.nextLevelXP .. ' (' .. progressPercent .. '%) | Crafted: ' .. data.totalCrafted,
-            icon = 'fa-solid fa-chart-line',
-            disabled = true
-        })
-        
-        -- Search option
-        if Config.EnableRecipeSearch then
-            table.insert(contextMenu, {
-                title = '🔍 Search Recipes',
-                description = 'Find recipes by name',
-                icon = 'fa-solid fa-magnifying-glass',
-                onSelect = function()
-                    OpenRecipeSearch(station, data)
-                end
-            })
-        end
-        
-        -- Specialization option
-        if Config.EnableSpecializations then
-            local specIcon = spec and Config.Specializations[spec.type].icon or 'fa-solid fa-star'
-            local specLabel = spec and ('Specialization: ' .. Config.Specializations[spec.type].label) or 'Choose Specialization'
-            
-            table.insert(contextMenu, {
-                title = '⭐ ' .. specLabel,
-                description = spec and 'View or change your specialization' or (playerLevel >= Config.SpecializationUnlockLevel and 'Select your crafting focus!' or 'Unlocks at level ' .. Config.SpecializationUnlockLevel),
-                icon = specIcon,
-                disabled = playerLevel < Config.SpecializationUnlockLevel and not spec,
-                onSelect = function()
-                    OpenSpecializationMenu()
-                end
-            })
-        end
-        
-        table.insert(contextMenu, {
-            title = '━━━━━━━━━━━━━━━━',
-            disabled = true
-        })
-        
-        -- Sort categories
-        local sortedCategories = {}
-        for category, _ in pairs(categories) do
-            table.insert(sortedCategories, category)
-        end
-        table.sort(sortedCategories)
-        
-        for _, category in ipairs(sortedCategories) do
-            local categoryRecipes = categories[category]
-            local availableCount = 0
-            local lockedCount = 0
-            
-            for _, r in ipairs(categoryRecipes) do
-                if r.locked then
-                    lockedCount = lockedCount + 1
-                else
-                    availableCount = availableCount + 1
-                end
-            end
-            
-            local description = availableCount .. ' available'
-            if lockedCount > 0 then
-                description = description .. ', ' .. lockedCount .. ' locked'
-            end
-            
-            table.insert(contextMenu, {
-                title = string.upper(category:sub(1,1)) .. category:sub(2),
-                description = description,
-                icon = GetCategoryIcon(category),
-                arrow = true,
-                onSelect = function()
-                    OpenCategoryMenu(station, category, categoryRecipes, playerLevel, data)
-                end
-            })
-        end
-        
-        lib.registerContext({
-            id = 'crafting_main_menu',
-            title = station.label or 'Crafting Station',
-            options = contextMenu
-        })
-        
-        lib.showContext('crafting_main_menu')
-    end, station.type)
-end
-
-function OpenRecipeSearch(station, playerData)
-    local input = lib.inputDialog('Search Recipes', {
-        {type = 'input', label = 'Recipe Name', placeholder = 'Enter search term...', required = true}
-    })
-    
-    if not input or not input[1] or input[1] == '' then return end
-    
-    local searchTerm = string.lower(input[1])
-    local results = {}
-    
-    for id, recipe in pairs(playerData.recipes) do
-        if string.find(string.lower(recipe.label), searchTerm) or
-           string.find(string.lower(recipe.description or ''), searchTerm) then
-            table.insert(results, {id = id, recipe = recipe, locked = false})
-        end
-    end
-    
-    if Config.ShowLockedRecipes and playerData.lockedRecipes then
-        for id, lockedData in pairs(playerData.lockedRecipes) do
-            local recipe = lockedData.recipe
-            if string.find(string.lower(recipe.label), searchTerm) or
-               string.find(string.lower(recipe.description or ''), searchTerm) then
-                table.insert(results, {
-                    id = id,
-                    recipe = recipe,
-                    locked = true,
-                    lockReason = lockedData.reason
-                })
-            end
-        end
-    end
-    
-    if #results == 0 then
-        ShowNotification('Search', 'No recipes found for "' .. input[1] .. '"', 'error')
-        return
-    end
-    
-    table.sort(results, function(a, b)
-        return a.recipe.requiredLevel < b.recipe.requiredLevel
-    end)
-    
-    local contextMenu = {}
-    
-    table.insert(contextMenu, {
-        title = '🔍 Search: "' .. input[1] .. '"',
-        description = #results .. ' results found',
-        icon = 'fa-solid fa-magnifying-glass',
-        disabled = true
-    })
-    
-    for _, recipeData in ipairs(results) do
-        local id = recipeData.id
-        local recipe = recipeData.recipe
-        local isLocked = recipeData.locked
-        
-        local title = recipe.label
-        local description = recipe.category:sub(1,1):upper() .. recipe.category:sub(2) .. ' • Level ' .. recipe.requiredLevel .. ' • ' .. recipe.xp .. ' XP'
-        
-        if isLocked then
-            if recipeData.lockReason == 'blueprint' then
-                title = '🔒 ' .. title .. ' [Blueprint Required]'
-            else
-                title = '🔒 ' .. title .. ' [Level ' .. recipe.requiredLevel .. ']'
-            end
-        end
-        
-        table.insert(contextMenu, {
-            title = title,
-            description = description,
-            icon = GetCategoryIcon(recipe.category),
-            disabled = isLocked,
-            arrow = not isLocked,
-            onSelect = not isLocked and function()
-                OpenRecipeMenu(station, id, recipe)
-            end or nil
-        })
-    end
-    
-    lib.registerContext({
-        id = 'crafting_search_results',
-        title = 'Search Results',
-        menu = 'crafting_main_menu',
-        options = contextMenu
-    })
-    
-    lib.showContext('crafting_search_results')
-end
-
-function OpenCategoryMenu(station, category, recipes, playerLevel, playerData)
-    local contextMenu = {}
-    
-    table.sort(recipes, function(a, b)
-        if a.locked ~= b.locked then
-            return not a.locked
-        end
-        return a.recipe.requiredLevel < b.recipe.requiredLevel
-    end)
-    
-    local spec = playerData.specialization
-    local hasSpecBonus = false
-    if spec and Config.EnableSpecializations then
-        local specConfig = Config.Specializations[spec.type]
-        for _, cat in ipairs(specConfig.bonusCategories) do
-            if cat == category then
-                hasSpecBonus = true
-                break
-            end
-        end
-    end
-    
-    if hasSpecBonus then
-        table.insert(contextMenu, {
-            title = '⭐ Specialization Bonus Active!',
-            description = '+' .. math.floor(Config.Specializations[spec.type].xpBonus * 100) .. '% XP',
-            icon = Config.Specializations[spec.type].icon,
-            disabled = true
-        })
-    end
-    
-    for _, recipeData in ipairs(recipes) do
-        local id = recipeData.id
-        local recipe = recipeData.recipe
-        local isLocked = recipeData.locked
-        local lockReason = recipeData.lockReason
-        
-        local title = recipe.label
-        local description = 'Ingredients: ' .. FormatIngredients(recipe.ingredients)
-        
-        if recipe.requiredTool then
-            local toolLabel = Config.Tools[recipe.requiredTool] and Config.Tools[recipe.requiredTool].label or recipe.requiredTool
-            description = description .. '\n🔧 Requires: ' .. toolLabel
-        end
-        
-        local levelText = '✓ Level ' .. recipe.requiredLevel
-        if isLocked and lockReason == 'level' then
-            levelText = '🔒 Level ' .. recipe.requiredLevel
-        end
-        description = description .. '\n' .. levelText .. ' • ' .. recipe.xp .. ' XP'
-        
-        if recipe.canProduceQuality then
-            description = description .. ' • ✨ Quality'
-        end
-        
-        if isLocked and lockReason == 'blueprint' then
-            title = '🔒 ' .. title
-            description = description .. '\n📜 Blueprint Required (' .. (recipe.blueprintRarity or 'unknown') .. ')'
-        end
-        
-        table.insert(contextMenu, {
-            title = title,
-            description = description,
-            icon = GetCategoryIcon(recipe.category),
-            disabled = isLocked,
-            arrow = not isLocked,
-            onSelect = not isLocked and function()
-                OpenRecipeMenu(station, id, recipe)
-            end or nil
-        })
-    end
-    
-    lib.registerContext({
-        id = 'crafting_category_menu',
-        title = string.upper(category:sub(1,1)) .. category:sub(2) .. ' Recipes',
-        menu = 'crafting_main_menu',
-        options = contextMenu
-    })
-    
-    lib.showContext('crafting_category_menu')
-end
-
-function OpenRecipeMenu(station, recipeId, recipe)
-    local resultLabel = QBCore.Shared.Items[recipe.result.item] and QBCore.Shared.Items[recipe.result.item].label or recipe.result.item
-    
-    local input = lib.inputDialog(recipe.label, {
-        {
-            type = 'number',
-            label = 'Amount to Craft',
-            description = 'Creates ' .. recipe.result.count .. 'x ' .. resultLabel .. ' each. Max: ' .. Config.MaxCraftAmount,
-            default = 1,
-            min = 1,
-            max = Config.MaxCraftAmount,
-            required = true
-        }
-    })
-    
-    if not input or not input[1] then return end
-    
-    local amount = tonumber(input[1])
-    if not amount or amount < 1 or amount > Config.MaxCraftAmount then
-        ShowNotification('Crafting', 'Invalid amount', 'error')
-        return
-    end
-    
-    StartCrafting(station, recipeId, recipe, amount)
-end
-
--- ====================== SPECIALIZATION UI ======================
-function OpenSpecializationMenu()
-    lib.callback('crafting:getSpecializations', false, function(data)
-        if not data then return end
-        
-        local contextMenu = {}
-        
-        if data.current then
-            local currentSpec = Config.Specializations[data.current.type]
-            
-            table.insert(contextMenu, {
-                title = '⭐ Current: ' .. currentSpec.label,
-                description = currentSpec.description,
-                icon = currentSpec.icon,
-                disabled = true
-            })
-            
-            local bonusText = table.concat(currentSpec.bonusCategories, ', ')
-            table.insert(contextMenu, {
-                title = '✅ Bonus Categories',
-                description = bonusText .. '\n+' .. math.floor(currentSpec.xpBonus * 100) .. '% XP',
-                icon = 'fa-solid fa-arrow-up',
-                disabled = true
-            })
-            
-            if data.canReset then
-                table.insert(contextMenu, {
-                    title = '🔄 Reset Specialization',
-                    description = data.resetCost > 0 and ('Cost: $' .. data.resetCost) or 'Free',
-                    icon = 'fa-solid fa-rotate-left',
-                    onSelect = function()
-                        local confirm = lib.alertDialog({
-                            header = 'Reset Specialization',
-                            content = 'Are you sure?' .. (data.resetCost > 0 and ('\n\nCost: $' .. data.resetCost) or ''),
-                            centered = true,
-                            cancel = true
-                        })
-                        
-                        if confirm == 'confirm' then
-                            lib.callback('crafting:resetSpecialization', false, function(success)
-                                if success then
-                                    ShowNotification('Specialization', 'Specialization reset!', 'success')
-                                else
-                                    ShowNotification('Specialization', 'Failed to reset', 'error')
-                                end
-                            end)
-                        end
-                    end
-                })
-            end
-        else
-            table.insert(contextMenu, {
-                title = '⭐ Choose Your Specialization',
-                description = 'Each provides bonuses to specific categories',
-                icon = 'fa-solid fa-star',
-                disabled = true
-            })
-            
-            for specId, specConfig in pairs(Config.Specializations) do
-                local bonusText = '+' .. math.floor(specConfig.xpBonus * 100) .. '% XP in: ' .. table.concat(specConfig.bonusCategories, ', ')
-                
-                table.insert(contextMenu, {
-                    title = specConfig.label,
-                    description = specConfig.description .. '\n' .. bonusText,
-                    icon = specConfig.icon,
-                    onSelect = function()
-                        local confirm = lib.alertDialog({
-                            header = 'Choose ' .. specConfig.label .. '?',
-                            content = specConfig.description,
-                            centered = true,
-                            cancel = true
-                        })
-                        
-                        if confirm == 'confirm' then
-                            lib.callback('crafting:selectSpecialization', false, function(success)
-                                if success then
-                                    ShowNotification('Specialization', 'You are now a ' .. specConfig.label .. '!', 'success')
-                                else
-                                    ShowNotification('Specialization', 'Failed to select', 'error')
-                                end
-                            end, specId)
-                        end
-                    end
-                })
-            end
-        end
-        
-        lib.registerContext({
-            id = 'crafting_specialization_menu',
-            title = 'Crafting Specialization',
-            menu = 'crafting_main_menu',
-            options = contextMenu
-        })
-        
-        lib.showContext('crafting_specialization_menu')
-    end)
-end
+]]--
 
 -- ====================== CRAFTING PROCESS ======================
 function StartCrafting(station, recipeId, recipe, amount)
@@ -762,6 +500,32 @@ local function SetupStations()
 end
 
 -- ====================== ADMIN: CREATE STATION ======================
+local isPlacingStation = false
+local previewProp = nil
+local previewHeading = 0.0
+local previewHeight = 0.0
+
+local function CleanupPreviewProp()
+    if previewProp and DoesEntityExist(previewProp) then
+        DeleteProp(previewProp)
+        previewProp = nil
+    end
+end
+
+local function UpdatePreviewProp(model, coords, heading, heightOffset)
+    CleanupPreviewProp()
+    
+    local offset = vector3(0.0, 0.0, heightOffset / 10.0 - 1.0)
+    previewProp = SpawnProp(model, coords, heading, offset)
+    
+    if previewProp and DoesEntityExist(previewProp) then
+        SetEntityAlpha(previewProp, 200, false)
+        SetEntityCollision(previewProp, false, false)
+        return true
+    end
+    return false
+end
+
 RegisterNetEvent('crafting:admin:createStation', function(stationType)
     local ped = PlayerPedId()
     local pCoords = GetEntityCoords(ped)
@@ -799,68 +563,144 @@ RegisterNetEvent('crafting:admin:createStation', function(stationType)
             label = 'Show on Map',
             description = 'Display blip on map',
             checked = false
-        },
-        {
-            type = 'slider',
-            label = 'Heading',
-            description = 'Rotation (0-360)',
-            default = math.floor(heading),
-            min = 0,
-            max = 360,
-            step = 5
-        },
-        {
-            type = 'slider',
-            label = 'Height Offset',
-            description = 'Adjust prop height',
-            default = 0,
-            min = -20,
-            max = 20,
-            step = 1
         }
     })
     
     if not input then return end
     
-    local stationData = {
-        type = stationType,
-        coords = vector3(pCoords.x, pCoords.y, pCoords.z),
-        heading = input[4],
-        blip = input[3],
-        label = input[1],
-        prop = input[2],
-        propOffset = vector3(0.0, 0.0, (input[5] / 10) - 1.0)
-    }
+    local stationLabel = input[1]
+    local selectedProp = input[2]
+    local showBlip = input[3]
     
-    -- Preview the prop
-    local previewProp = SpawnProp(stationData.prop, stationData.coords, stationData.heading, stationData.propOffset)
+    -- Initialize preview
+    previewHeading = heading
+    previewHeight = 0.0
+    isPlacingStation = true
     
-    local confirmInput = lib.alertDialog({
-        header = 'Confirm Station Placement',
-        content = 'Station: ' .. stationData.label .. '\nProp: ' .. stationData.prop .. '\n\nLooks good?',
-        centered = true,
-        cancel = true
-    })
-    
-    -- Delete preview prop
-    if previewProp then
-        DeleteProp(previewProp)
-    end
-    
-    if confirmInput ~= 'confirm' then
-        ShowNotification('Cancelled', 'Station creation cancelled', 'info')
+    -- Create initial preview
+    if not UpdatePreviewProp(selectedProp, pCoords, previewHeading, previewHeight) then
+        ShowNotification('Error', 'Failed to load prop model', 'error')
+        isPlacingStation = false
         return
     end
     
-    ShowNotification('Crafting Station', 'Saving station...', 'info')
+    ShowNotification('Prop Preview', 'Use Arrow Keys to rotate\nPage Up/Down for height\nEnter to confirm, Backspace to cancel', 'info')
     
-    lib.callback('crafting:admin:saveStation', false, function(success)
-        if success then
-            ShowNotification('Success', 'Crafting station created!', 'success')
-        else
-            ShowNotification('Error', 'Failed to create station', 'error')
+    -- Preview loop
+    CreateThread(function()
+        while isPlacingStation do
+            local playerPed = PlayerPedId()
+            local coords = GetEntityCoords(playerPed)
+            
+            -- Disable controls
+            DisableAllControlActions(0)
+            EnableControlAction(0, 1, true)  -- Look Left/Right
+            EnableControlAction(0, 2, true)  -- Look Up/Down
+            EnableControlAction(0, 200, true) -- Pause menu
+            
+            -- Rotation controls
+            if IsControlPressed(0, 174) then -- Left Arrow
+                previewHeading = previewHeading + 2.0
+                if previewHeading >= 360.0 then previewHeading = previewHeading - 360.0 end
+            elseif IsControlPressed(0, 175) then -- Right Arrow
+                previewHeading = previewHeading - 2.0
+                if previewHeading < 0.0 then previewHeading = previewHeading + 360.0 end
+            end
+            
+            -- Height controls
+            if IsControlPressed(0, 10) then -- Page Up
+                previewHeight = previewHeight + 1
+                if previewHeight > 20 then previewHeight = 20 end
+            elseif IsControlPressed(0, 11) then -- Page Down
+                previewHeight = previewHeight - 1
+                if previewHeight < -20 then previewHeight = -20 end
+            end
+            
+            -- Update preview prop position and rotation
+            if previewProp and DoesEntityExist(previewProp) then
+                local offset = vector3(0.0, 0.0, previewHeight / 10.0 - 1.0)
+                local propCoords = vector3(
+                    coords.x + offset.x,
+                    coords.y + offset.y,
+                    coords.z + offset.z
+                )
+                SetEntityCoords(previewProp, propCoords.x, propCoords.y, propCoords.z, false, false, false, false)
+                SetEntityHeading(previewProp, previewHeading)
+            end
+            
+            -- Display help text
+            BeginTextCommandDisplayHelp('STRING')
+            AddTextComponentSubstringPlayerName(
+                string.format(
+                    'Rotation: %.1f° | Height: %.1f~n~'
+                    ..'~INPUT_MOVE_LR~ Rotate | ~INPUT_REPLAY_PAGEUP~ ~INPUT_REPLAY_PAGEDOWN~ Height~n~'
+                    ..'~INPUT_FRONTEND_ACCEPT~ Confirm | ~INPUT_FRONTEND_CANCEL~ Cancel',
+                    previewHeading,
+                    previewHeight / 10.0
+                )
+            )
+            EndTextCommandDisplayHelp(0, false, true, -1)
+            
+            -- Confirm placement
+            if IsControlJustPressed(0, 191) then -- Enter
+                break
+            end
+            
+            -- Cancel placement
+            if IsControlJustPressed(0, 194) then -- Backspace
+                CleanupPreviewProp()
+                isPlacingStation = false
+                ShowNotification('Cancelled', 'Station placement cancelled', 'info')
+                return
+            end
+            
+            Wait(0)
         end
-    end, stationData)
+        
+        -- Confirmed placement
+        isPlacingStation = false
+        local finalCoords = GetEntityCoords(PlayerPedId())
+        
+        local stationData = {
+            type = stationType,
+            coords = vector3(finalCoords.x, finalCoords.y, finalCoords.z),
+            heading = previewHeading,
+            blip = showBlip,
+            label = stationLabel,
+            prop = selectedProp,
+            propOffset = vector3(0.0, 0.0, previewHeight / 10.0 - 1.0)
+        }
+        
+        CleanupPreviewProp()
+        
+        local confirmInput = lib.alertDialog({
+            header = 'Confirm Station Placement',
+            content = string.format(
+                'Station: %s\nProp: %s\nRotation: %.1f°\nHeight: %.1f\n\nSave this station?',
+                stationData.label,
+                stationData.prop,
+                stationData.heading,
+                previewHeight / 10.0
+            ),
+            centered = true,
+            cancel = true
+        })
+        
+        if confirmInput ~= 'confirm' then
+            ShowNotification('Cancelled', 'Station creation cancelled', 'info')
+            return
+        end
+        
+        ShowNotification('Crafting Station', 'Saving station...', 'info')
+        
+        lib.callback('crafting:admin:saveStation', false, function(success)
+            if success then
+                ShowNotification('Success', 'Crafting station created!', 'success')
+            else
+                ShowNotification('Error', 'Failed to create station', 'error')
+            end
+        end, stationData)
+    end)
 end)
 
 -- ====================== ADMIN: MANAGE STATIONS ======================
@@ -1107,6 +947,7 @@ end)
 
 AddEventHandler('onResourceStop', function(resourceName)
     if resourceName ~= GetCurrentResourceName() then return end
+    CleanupPreviewProp()
     ClearAllProps()
     for _, blip in ipairs(craftingBlips) do
         RemoveBlip(blip)

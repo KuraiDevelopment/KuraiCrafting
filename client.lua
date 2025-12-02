@@ -25,33 +25,106 @@ local function LoadModel(model)
     
     local hash = type(model) == 'number' and model or GetHashKey(model)
     
+    -- Check if model is valid in game files
     if not IsModelInCdimage(hash) then
-        if Config.EnableDebug then
-            print('[Crafting] Model not in game files: ' .. tostring(model))
-        end
+        print('[Crafting] ERROR: Model not found in game files: ' .. tostring(model))
+        print('[Crafting] Hash tried: ' .. tostring(hash))
         return nil
     end
     
+    -- Check if it's already loaded
+    if HasModelLoaded(hash) then
+        if Config.EnableDebug then
+            print('[Crafting] Model already loaded: ' .. tostring(model))
+        end
+        return hash
+    end
+    
+    -- Request the model
+    if Config.EnableDebug then
+        print('[Crafting] Requesting model: ' .. tostring(model))\n    end
+    
     RequestModel(hash)
+    
+    -- Wait for model to load with timeout
     local attempts = 0
-    while not HasModelLoaded(hash) and attempts < 100 do
-        Wait(10)
+    local maxAttempts = 200  -- Increased from 100
+    
+    while not HasModelLoaded(hash) and attempts < maxAttempts do
+        Wait(50)  -- Increased from 10ms to 50ms
         attempts = attempts + 1
+        
+        -- Re-request every 10 attempts
+        if attempts % 10 == 0 then
+            if Config.EnableDebug then
+                print('[Crafting] Still waiting for model... Attempt ' .. attempts .. '/' .. maxAttempts)
+            end
+            RequestModel(hash)
+        end
     end
     
     if not HasModelLoaded(hash) then
-        print('[Crafting] Failed to load model after 100 attempts: ' .. tostring(model))
+        print('[Crafting] ERROR: Failed to load model after ' .. maxAttempts .. ' attempts: ' .. tostring(model))
+        print('[Crafting] Hash: ' .. tostring(hash))
         return nil
     end
     
     if Config.EnableDebug then
-        print('[Crafting] Successfully loaded model: ' .. tostring(model))
+        print('[Crafting] Successfully loaded model: ' .. tostring(model) .. ' (took ' .. attempts .. ' attempts)')
     end
     
     return hash
 end
 
 -- ====================== PROP MANAGEMENT ======================
+local fallbackProps = {
+    'prop_tool_bench02',
+    'prop_toolchest_05',
+    'prop_table_03',
+    'prop_table_04',
+    'prop_chair_01a'
+}
+
+local function SpawnPropWithFallback(model, coords, heading, offset, stationType)
+    -- Try primary model first
+    local prop = SpawnProp(model, coords, heading, offset)
+    if prop then return prop end
+    
+    -- If primary failed and we have a station type, try station-specific fallbacks
+    if stationType and Config.StationTypes[stationType] then
+        local stationConfig = Config.StationTypes[stationType]
+        if stationConfig.props then
+            print('[Crafting] Primary prop failed, trying station alternatives...')
+            for _, propData in ipairs(stationConfig.props) do
+                if propData.model ~= model then
+                    print('[Crafting] Trying alternative: ' .. propData.model)
+                    prop = SpawnProp(propData.model, coords, heading, offset)
+                    if prop then
+                        print('[Crafting] Successfully spawned alternative prop: ' .. propData.model)
+                        return prop
+                    end
+                end
+            end
+        end
+    end
+    
+    -- Try universal fallbacks
+    print('[Crafting] All station props failed, trying universal fallbacks...')
+    for _, fallbackModel in ipairs(fallbackProps) do
+        if fallbackModel ~= model then
+            print('[Crafting] Trying fallback: ' .. fallbackModel)
+            prop = SpawnProp(fallbackModel, coords, heading, offset)
+            if prop then
+                print('[Crafting] Successfully spawned fallback prop: ' .. fallbackModel)
+                return prop
+            end
+        end
+    end
+    
+    print('[Crafting] ERROR: All prop spawn attempts failed for this station!')
+    return nil
+end
+
 local function SpawnProp(model, coords, heading, offset)
     if not Config.SpawnStationProps then return nil end
     if not model then 
@@ -485,11 +558,25 @@ local function SetupStations()
         end
         
         if shouldSpawnProp and station.prop then
+            if Config.EnableDebug then
+                print('[Crafting] Setting up station: ' .. (station.label or 'Unknown'))
+                print('[Crafting] Type: ' .. station.type)
+                print('[Crafting] Prop: ' .. tostring(station.prop))
+                print('[Crafting] Coords: ' .. tostring(station.coords))
+            end
+            
             local offset = station.propOffset or stationConfig.propOffset or vector3(0.0, 0.0, -1.0)
-            local prop = SpawnProp(station.prop, station.coords, station.heading, offset)
+            local prop = SpawnPropWithFallback(station.prop, station.coords, station.heading, offset, station.type)
             if prop then
                 craftingProps[i] = prop
+                if Config.EnableDebug then
+                    print('[Crafting] Prop spawned successfully for: ' .. (station.label or 'Unknown'))
+                end
+            else
+                print('[Crafting] WARNING: Failed to spawn prop for station: ' .. (station.label or 'Unknown'))
             end
+        elseif shouldSpawnProp and not station.prop then
+            print('[Crafting] WARNING: Station ' .. (station.label or 'Unknown') .. ' is set to spawn prop but no prop model defined')
         end
         
         -- Create target zone
@@ -997,4 +1084,60 @@ AddEventHandler('onResourceStop', function(resourceName)
     for _, blip in ipairs(craftingBlips) do
         RemoveBlip(blip)
     end
+end)
+
+-- ====================== TEST COMMANDS ======================
+RegisterCommand('testprop', function(source, args)
+    local ped = PlayerPedId()
+    local coords = GetEntityCoords(ped)
+    local heading = GetEntityHeading(ped)
+    
+    local propModel = args[1] or 'prop_tool_bench02'
+    
+    print('=========================================')
+    print('[Test] Attempting to spawn test prop: ' .. propModel)
+    print('[Test] Player coords: ' .. tostring(coords))
+    print('=========================================')
+    
+    local testProp = SpawnProp(propModel, coords + vector3(0.0, 2.0, 0.0), heading, vector3(0.0, 0.0, 0.0))
+    
+    if testProp then
+        print('[Test] SUCCESS - Prop spawned with entity ID: ' .. testProp)
+        print('[Test] Prop exists: ' .. tostring(DoesEntityExist(testProp)))
+        print('[Test] Prop coords: ' .. tostring(GetEntityCoords(testProp)))
+        print('=========================================')
+        
+        -- Delete after 10 seconds
+        SetTimeout(10000, function()
+            if DoesEntityExist(testProp) then
+                DeleteEntity(testProp)
+                print('[Test] Test prop deleted after 10 seconds')
+            end
+        end)
+    else
+        print('[Test] FAILED - Could not spawn prop')
+        print('=========================================')
+    end
+end)
+
+RegisterCommand('listprops', function()
+    print('=========================================')
+    print('[Crafting] Current spawned props:')
+    local count = 0
+    for index, prop in pairs(craftingProps) do
+        count = count + 1
+        print(string.format('[%s] Entity ID: %s | Exists: %s', 
+            tostring(index), 
+            tostring(prop), 
+            tostring(DoesEntityExist(prop))
+        ))
+    end
+    print('[Crafting] Total props: ' .. count)
+    print('=========================================')
+end)
+
+RegisterCommand('reloadstations', function()
+    print('[Crafting] Reloading all stations...')
+    SetupStations()
+    print('[Crafting] Stations reloaded!')
 end)

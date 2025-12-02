@@ -40,10 +40,10 @@ Config.StationTypes = {
         props = {
             {model = 'prop_tool_bench02', label = 'Tool Bench'},
             {model = 'prop_toolchest_05', label = 'Tool Chest'},
-            {model = 'gr_prop_gr_bench_04a', label = 'Garage Bench'},
             {model = 'prop_tool_bench02_ld', label = 'Light Duty Bench'},
             {model = 'prop_toolchest_04', label = 'Rolling Tool Chest'},
-            {model = 'prop_toolchest_02', label = 'Red Tool Chest'}
+            {model = 'prop_toolchest_02', label = 'Red Tool Chest'},
+            {model = 'prop_table_03', label = 'Simple Table'}
         }
     },
     electronics_bench = {
@@ -64,15 +64,15 @@ Config.StationTypes = {
         label = 'Weapon Bench',
         icon = 'fa-solid fa-gun',
         categories = {'weapons', 'attachments', 'ammo'},
-        defaultProp = 'gr_prop_bunker_bench_01a',
+        defaultProp = 'prop_tool_bench02',
         propOffset = vector3(0.0, 0.0, -1.0),
         targetSize = vector3(2.5, 1.5, 1.5),
         props = {
-            {model = 'gr_prop_bunker_bench_01a', label = 'Weapon Bench'},
-            {model = 'gr_prop_bunker_bench_02a', label = 'Weapon Bench Alt'},
-            {model = 'gr_prop_gr_bench_04a', label = 'Heavy Bench'},
-            {model = 'prop_toolchest_04', label = 'Ammo Chest'},
-            {model = 'gr_prop_bunker_crate_01a', label = 'Weapon Crate'}
+            {model = 'prop_tool_bench02', label = 'Tool Bench'},
+            {model = 'prop_toolchest_05', label = 'Heavy Tool Chest'},
+            {model = 'prop_toolchest_04', label = 'Rolling Tool Chest'},
+            {model = 'imp_prop_impexp_sofabed_01a', label = 'Work Table'},
+            {model = 'bkr_prop_clubhouse_table_01', label = 'Club Table'}
         }
     },
     medical_station = {
@@ -145,7 +145,7 @@ Config.CraftingStations = {
         blip = false,
         label = 'Underground Workshop',
         spawnProp = true,
-        prop = 'gr_prop_bunker_bench_01a',
+        prop = 'prop_tool_bench02',
         propOffset = vector3(0.0, 0.0, -1.0)
     },
     {
